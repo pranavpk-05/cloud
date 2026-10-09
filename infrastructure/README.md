@@ -6,7 +6,7 @@ This deployment belongs to **pranavpk-05/cloud**, with its Flask code under `stu
 
 This template is **not running in AWS merely because the file exists in GitHub**. Creating the stack will launch a billable EC2 instance, RDS MySQL database, public IPv4 address, EBS volume, S3 bucket and AWS Secrets Manager secret. Check AWS Billing and the estimated recurring charges before submitting. The account's verification-in-progress status may temporarily prevent provisioning.
 
-To avoid changing the unverified existing `project-vpc` configuration, the stack creates a **new dedicated VPC, 10.20.0.0/16**. The original VPC is untouched. No NAT Gateway or load balancer is created.
+To avoid changing the unverified existing `project-vpc` configuration, the stack creates a **new dedicated VPC, 10.0.0.0/16**. The original VPC is untouched. No NAT Gateway or load balancer is created.
 
 ## Deploy in the AWS Console
 
