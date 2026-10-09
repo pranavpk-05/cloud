@@ -1,0 +1,12 @@
+# Local generated files, student data, secrets and runtime logs
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+instance/
+*.log
+.venv/
+venv/
