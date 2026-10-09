@@ -141,7 +141,7 @@ Resources:
     Properties: {Roles: [!Ref Role]}
   WebInstance:
     Type: AWS::EC2::Instance
-    DependsOn: [InternetRoute, Db]
+    DependsOn: InternetRoute
     Properties:
       ImageId: !Ref AmiId
       InstanceType: t3.micro
