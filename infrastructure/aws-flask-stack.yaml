@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Student registration demonstration (billable EC2, RDS, IPv4, EBS, S3 and Secrets Manager).
+Parameters:
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  HttpAllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: HTTP demo audience. Set to YOUR_PUBLIC_IP/32 to restrict access.
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: student-registration-vpc}]
+  IGW:
+    Type: AWS::EC2::InternetGateway
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref VPC, InternetGatewayId: !Ref IGW}
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: Name, Value: student-registration-public}]
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{Key: Name, Value: student-registration-db-a}]
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: [{Key: Name, Value: student-registration-db-b}]
+  PublicRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref VPC}
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRoutes
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+  PublicAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref PublicRoutes, SubnetId: !Ref PublicSubnet}
+  PrivateRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref VPC}
+  PrivateAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref PrivateRoutes, SubnetId: !Ref PrivateSubnetA}
+  PrivateAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref PrivateRoutes, SubnetId: !Ref PrivateSubnetB}
+  WebSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Demo web HTTP, no inbound SSH
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: !Ref HttpAllowedCidr}
+  DbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private RDS MySQL from web security group only
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref WebSG}
+  Photos:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration: {Status: Enabled}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private DB subnets across availability zones
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+  Db:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Engine: mysql
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      StorageType: gp2
+      StorageEncrypted: true
+      DBName: studentdb
+      MasterUsername: studentadmin
+      ManageMasterUserPassword: true
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+      VPCSecurityGroups: [!Ref DbSG]
+      DBSubnetGroupName: !Ref DbSubnetGroup
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - {Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: 'sts:AssumeRole'}
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Policies:
+        - PolicyName: student-registration-resources
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource: !Sub '${Photos.Arn}/students/*'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !GetAtt Db.MasterUserSecret.SecretArn
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {Roles: [!Ref Role]}
+  WebInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: [InternetRoute, Db]
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref WebSG]
+      IamInstanceProfile: !Ref InstanceProfile
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 12, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true}
+      Tags: [{Key: Name, Value: student-registration-web}]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          exec > >(tee -a /var/log/student-registration-bootstrap.log) 2>&1
+          dnf install -y git python3 python3-pip openssl curl
+          curl --fail --location --retry 5 --retry-delay 5 --silent --show-error \
+            https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+            -o /etc/pki/tls/certs/rds-global-bundle.pem
+          git clone --depth 1 --branch main https://github.com/pranavpk-05/cloud.git /opt/cloud
+          cd /opt/cloud/student-registration
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt
+          chown -R ec2-user:ec2-user /opt/cloud/student-registration
+          cat >/etc/student-registration.env <<'APPENV'
+          APP_MODE=aws
+          AWS_DEFAULT_REGION=${AWS::Region}
+          DB_SECRET_ARN=${Db.MasterUserSecret.SecretArn}
+          DB_HOST=${Db.Endpoint.Address}
+          DB_NAME=studentdb
+          DB_SSL_CA=/etc/pki/tls/certs/rds-global-bundle.pem
+          S3_BUCKET_NAME=${Photos}
+          APPENV
+          printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >>/etc/student-registration.env
+          chmod 600 /etc/student-registration.env
+          chown root:root /etc/student-registration.env
+          cat >/etc/systemd/system/student-registration.service <<'SERVICE'
+          [Unit]
+          Description=Student registration Flask/Gunicorn
+          Wants=network-online.target
+          After=network-online.target
+          [Service]
+          Type=simple
+          User=ec2-user
+          Group=ec2-user
+          WorkingDirectory=/opt/cloud/student-registration
+          EnvironmentFile=/etc/student-registration.env
+          ExecStart=/opt/cloud/student-registration/.venv/bin/gunicorn --workers 2 --bind 0.0.0.0:80 aws_entrypoint:app
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
+          CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ReadWritePaths=/opt/cloud/student-registration/instance
+          Restart=always
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+          set -a
+          . /etc/student-registration.env
+          set +a
+          cat >/opt/cloud/student-registration/init_aws_db.py <<'PY'
+          from pathlib import Path
+          import aws_entrypoint
+          from app import connection
+          db = connection()
+          try:
+              with db.cursor() as cur:
+                  for sql in Path('schema.sql').read_text().split(';'):
+                      if sql.strip():
+                          cur.execute(sql)
+              db.commit()
+          finally:
+              db.close()
+          PY
+          echo 'Initializing RDS schema'
+          initialized=0
+          for attempt in $(seq 1 18); do
+            if .venv/bin/python init_aws_db.py; then
+              initialized=1
+              break
+            fi
+            sleep 10
+          done
+          test "$initialized" = 1
+          systemctl daemon-reload
+          systemctl enable --now student-registration.service
+          systemctl is-active --quiet student-registration.service
+          echo 'Bootstrap complete'
+Outputs:
+  WebsiteUrl:
+    Description: HTTP classroom demo only; do not submit real personal data.
+    Value: !Sub 'http://${WebInstance.PublicIp}'
+  InstanceId: {Value: !Ref WebInstance}
+  VpcId: {Value: !Ref VPC}
+  PublicSubnet: {Value: !Ref PublicSubnet}
+  PrivateSubnetA: {Value: !Ref PrivateSubnetA}
+  PrivateSubnetB: {Value: !Ref PrivateSubnetB}
+  DbEndpoint: {Value: !GetAtt Db.Endpoint.Address}
+  DatabaseId: {Value: !Ref Db}
+  BucketName: {Value: !Ref Photos}
+  WebSecurityGroupId: {Value: !Ref WebSG}
+  DbSecurityGroupId: {Value: !Ref DbSG}
