@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Student registration | LearnForward</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body>
+<header><a class="brand" href="/" aria-label="LearnForward home"><span class="mark">L<span>↗</span></span>LearnForward<span class="brand-sub">STUDENT PORTAL</span></a><span class="header-note">Your next chapter starts here</span></header>
+<main><aside><span class="eyebrow">LEARN. BUILD. GROW.</span><h1>A small step.<br>A world of<br><em>possibilities.</em></h1><p>Bring your curiosity. Find your course.<br>Start building the future you imagine.</p><div class="art" aria-hidden="true"><div class="orb"></div><div class="stairs"><i></i><i></i><i></i><i></i></div><span class="spark">✳</span><span class="art-caption">THE WAY FORWARD IS YOURS.</span></div><div class="aside-bottom"><span class="dot"></span> Made for your learning journey</div></aside>
+<section class="panel"><div class="panel-heading"><span class="eyebrow">LET’S GET YOU STARTED</span><span class="step">01 / Registration</span></div><h2>Student registration</h2><p class="intro">Tell us a little about yourself to join your course.</p>
+{% if local %}<div class="mode-note">Local project mode · Your registration and photo are saved on this computer.</div>{% endif %}
+{% if error %}<div class="error" role="alert">{{ error }} Please select your photo again before submitting.</div>{% endif %}
+<form action="/register" method="post" enctype="multipart/form-data" id="registration">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="section-label"><span>01</span> Your details</div>
+<label for="name">Full name <b>*</b></label><input id="name" name="name" placeholder="e.g. Ananya Kumar" autocomplete="name" minlength="2" maxlength="100" value="{{ values.get('name', '') }}" required>
+<label for="email">Email address <b>*</b></label><input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" maxlength="150" value="{{ values.get('email', '') }}" required><small>Use an email address you check regularly.</small>
+<label for="course">Choose your course <b>*</b></label><select id="course" name="course" required><option value="">Select a course</option>{% for course in courses %}<option {% if values.get('course') == course %}selected{% endif %}>{{ course }}</option>{% endfor %}</select>
+<div class="section-label second"><span>02</span> Your student photo</div>
+<label class="upload" for="photo"><img id="preview" alt="Your selected student photo" hidden><span class="upload-icon" id="upload-icon">↑</span><span><strong id="file-label">Choose a photo</strong><span class="upload-help">JPG, PNG or WebP · Up to 5 MB</span></span><span class="browse">Browse</span></label>
+<input class="file-input" id="photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" required aria-describedby="photo-error"><small id="photo-error" role="status">Choose a clear photo of yourself.</small>
+<button type="submit" id="submit">Complete registration <span>↗</span></button><p class="form-note">Your details and photo will be saved for this registration.</p>
+</form></section></main><footer><span>LearnForward · Student registration</span><span>One step closer to what’s next.</span></footer><script src="{{ url_for('static', filename='form.js') }}"></script></body></html>
